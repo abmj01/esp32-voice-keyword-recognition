@@ -24,9 +24,9 @@ limitations under the License.
 #include "freertos/FreeRTOS.h"
 // clang-format on
 
-#include "driver/i2s.h"
+#include "driver/i2s_std.h"
+#include "esp_err.h"
 #include "esp_log.h"
-#include "esp_spi_flash.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/task.h"
@@ -65,10 +65,11 @@ int16_t g_history_buffer[history_samples_to_keep];
 
 #if !NO_I2S_SUPPORT
 uint8_t g_i2s_read_buffer[i2s_bytes_to_read] = {};
+i2s_chan_handle_t g_rx_handle = NULL;
 #if CONFIG_IDF_TARGET_ESP32
-i2s_port_t i2s_port = I2S_NUM_1; // for esp32-eye
+int i2s_port = I2S_NUM_1; // for esp32-eye
 #else
-i2s_port_t i2s_port = I2S_NUM_0; // for esp32-s3-eye
+int i2s_port = I2S_NUM_0; // for esp32-s3-eye
 #endif
 #endif
 }  // namespace
@@ -78,49 +79,66 @@ i2s_port_t i2s_port = I2S_NUM_0; // for esp32-s3-eye
 #else
 static void i2s_init(void) {
   // Start listening for audio: MONO @ 16KHz
-  i2s_config_t i2s_config = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-      .sample_rate = 16000,
-      .bits_per_sample = (i2s_bits_per_sample_t) 16,
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-      .communication_format = I2S_COMM_FORMAT_I2S,
-      .intr_alloc_flags = 0,
-      .dma_buf_count = 3,
-      .dma_buf_len = 300,
-      .use_apll = false,
-      .tx_desc_auto_clear = false,
-      .fixed_mclk = -1,
-  };
+  i2s_chan_config_t chan_cfg =
+      I2S_CHANNEL_DEFAULT_CONFIG(i2s_port, I2S_ROLE_MASTER);
+  esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &g_rx_handle);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Error in i2s_new_channel");
+  }
+
 #if CONFIG_IDF_TARGET_ESP32S3
-  i2s_pin_config_t pin_config = {
-      .bck_io_num = 6,     // IIS_SCLK (BCLK)
-      .ws_io_num = 7,      // IIS_LCLK (WS / L-R)
-      .data_out_num = -1,  // IIS_DSIN (unused, mic is input-only)
-      .data_in_num = 9,    // IIS_DOUT (SD)
+  i2s_std_config_t std_cfg = {
+      .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
+          I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+      .gpio_cfg =
+          {
+              .mclk = I2S_GPIO_UNUSED,
+              .bclk = GPIO_NUM_6,        // IIS_SCLK (BCLK)
+              .ws = GPIO_NUM_7,          // IIS_LCLK (WS / L-R)
+              .dout = I2S_GPIO_UNUSED,   // IIS_DSIN (unused, mic is input-only)
+              .din = GPIO_NUM_9,         // IIS_DOUT (SD)
+              .invert_flags =
+                  {
+                      .mclk_inv = false,
+                      .bclk_inv = false,
+                      .ws_inv = false,
+                  },
+          },
   };
-  i2s_config.bits_per_sample = (i2s_bits_per_sample_t) 32;
 #else
-  i2s_pin_config_t pin_config = {
-      .bck_io_num = 26,    // IIS_SCLK
-      .ws_io_num = 32,     // IIS_LCLK
-      .data_out_num = -1,  // IIS_DSIN
-      .data_in_num = 33,   // IIS_DOUT
+  i2s_std_config_t std_cfg = {
+      .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
+          I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+      .gpio_cfg =
+          {
+              .mclk = I2S_GPIO_UNUSED,
+              .bclk = GPIO_NUM_26,      // IIS_SCLK
+              .ws = GPIO_NUM_32,        // IIS_LCLK
+              .dout = I2S_GPIO_UNUSED,  // IIS_DSIN
+              .din = GPIO_NUM_33,       // IIS_DOUT
+              .invert_flags =
+                  {
+                      .mclk_inv = false,
+                      .bclk_inv = false,
+                      .ws_inv = false,
+                  },
+          },
   };
 #endif
+  // Mic is wired for the left channel only (L/R tied to GND); the STD
+  // Philips default macro sets slot_mask to BOTH regardless of mono/stereo
+  // on this chip family, so it must be forced explicitly.
+  std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
 
-  esp_err_t ret = 0;
-  ret = i2s_driver_install(i2s_port, &i2s_config, 0, NULL);
+  ret = i2s_channel_init_std_mode(g_rx_handle, &std_cfg);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Error in i2s_driver_install");
+    ESP_LOGE(TAG, "Error in i2s_channel_init_std_mode");
   }
-  ret = i2s_set_pin(i2s_port, &pin_config);
+  ret = i2s_channel_enable(g_rx_handle);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Error in i2s_set_pin");
-  }
-
-  ret = i2s_zero_dma_buffer(i2s_port);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Error in initializing dma buffer with 0");
+    ESP_LOGE(TAG, "Error in i2s_channel_enable");
   }
 }
 #endif
@@ -132,15 +150,25 @@ static void CaptureSamples(void* arg) {
   size_t bytes_read = i2s_bytes_to_read;
   i2s_init();
   while (1) {
-    /* read 100ms data at once from i2s */
-    i2s_read(i2s_port, (void*)g_i2s_read_buffer, i2s_bytes_to_read,
-             &bytes_read, pdMS_TO_TICKS(100));
+    /* 100ms was too tight under scheduling jitter and caused the DMA read
+     * to time out after only one descriptor; 1000ms gives it enough
+     * headroom while still returning as soon as enough data is ready. */
+    int64_t start_us = esp_timer_get_time();
+    esp_err_t read_ret = i2s_channel_read(
+        g_rx_handle, (void*)g_i2s_read_buffer, i2s_bytes_to_read, &bytes_read,
+        pdMS_TO_TICKS(1000));
+    int64_t elapsed_us = esp_timer_get_time() - start_us;
 
     if (bytes_read <= 0) {
-      ESP_LOGE(TAG, "Error in I2S read : %d", bytes_read);
+      ESP_LOGE(TAG, "Error in I2S read : %d (esp_err: %s, elapsed_ms: %lld)",
+               bytes_read, esp_err_to_name(read_ret), elapsed_us / 1000);
     } else {
       if (bytes_read < i2s_bytes_to_read) {
-        ESP_LOGW(TAG, "Partial I2S read");
+        ESP_LOGW(TAG,
+                 "Partial I2S read: got %d of %d bytes (esp_err: %s, "
+                 "elapsed_ms: %lld)",
+                 bytes_read, i2s_bytes_to_read, esp_err_to_name(read_ret),
+                 elapsed_us / 1000);
       }
 #if CONFIG_IDF_TARGET_ESP32S3
       // rescale the data

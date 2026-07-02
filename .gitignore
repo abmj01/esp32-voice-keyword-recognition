@@ -1,2 +1,11 @@
 /build
 /micro_speech/build
+
+# Downloaded by the component manager on every `idf.py build`, reproducible
+# from dependencies.lock — don't commit ~18MB of vendored TF-Lite/esp-nn source
+/managed_components
+/micro_speech/managed_components
+
+# Backup IDF writes whenever sdkconfig changes via menuconfig
+sdkconfig.old
+/micro_speech/sdkconfig.old
