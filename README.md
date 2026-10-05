@@ -1,7 +1,7 @@
 # ESP32-S3 Keyword Recognition
 
 A small ESP32-S3 board listens to a microphone and recognizes eight
-spoken words — **down, go, left, no, right, stop, up, yes** — entirely
+spoken words: **down, go, left, no, right, stop, up, yes** entirely
 on-device. No Wi-Fi, no cloud API, no internet connection: a trained
 neural network runs directly on the microcontroller and prints the
 detected word over serial in real time.
@@ -15,7 +15,7 @@ Detected    stop, score: 8.35
 This project connects two things: [Espressif's `micro_speech`](https://github.com/espressif/esp-tflite-micro/tree/master/examples/micro_speech)
 example (the ESP32 firmware that runs a keyword-spotting model in
 real time) and TensorFlow's [Simple audio recognition](https://www.tensorflow.org/tutorials/audio/simple_audio)
-tutorial (how to train one). Neither works with the other as-is — see
+tutorial (how to train one). Neither works with the other as-is. See
 [How they were linked](#how-they-were-linked) below for why, and what
 had to change on both sides to make it work.
 
@@ -35,8 +35,8 @@ had to change on both sides to make it work.
 
 ## Software
 
-- **ESP-IDF v6.0.2** (not Arduino) — see [docs/I2S_DRIVER_NOTE.md](docs/I2S_DRIVER_NOTE.md) for why the version matters here: newer ESP-IDF removed the legacy I2S driver this example was originally written against.
-- **[esp-tflite-micro](https://github.com/espressif/esp-tflite-micro)** — Espressif's ESP-IDF port of Google's TensorFlow Lite Micro, pulled in as a component dependency.
+- **ESP-IDF v6.0.2:** see [docs/I2S_DRIVER_NOTE.md](docs/I2S_DRIVER_NOTE.md) for why the version matters here: newer ESP-IDF removed the legacy I2S driver this example was originally written against.
+- **[esp-tflite-micro](https://github.com/espressif/esp-tflite-micro):** Espressif's ESP-IDF port of Google's TensorFlow Lite Micro, pulled in as a component dependency.
 - **TensorFlow / Keras** (Python) — for training and quantizing the model, in [`simple_audio.ipynb`](simple_audio.ipynb).
 
 ## How they were linked
@@ -45,18 +45,18 @@ had to change on both sides to make it work.
 scaled to match human hearing, plus noise reduction and automatic gain
 control) before ever handing anything to its model. TensorFlow's
 `simple_audio` tutorial trains on a **plain linear-frequency
-spectrogram** instead — a different recipe, different numbers,
+spectrogram** instead. Different recipe, different numbers,
 different shape. A model trained on one doesn't work on the other.
 
 To close that gap:
 - `simple_audio.ipynb` was changed to generate training features using
   TensorFlow's `audio_microfrontend` op, configured to match the exact
-  window size, stride, and channel count the firmware uses — so
+  window size, stride, and channel count the firmware uses. so that the
   training sees the same kind of data the device will. Full breakdown
   in [docs/SIMPLE_AUDIO_CHANGES.md](docs/SIMPLE_AUDIO_CHANGES.md).
 - The notebook's CNN architecture was made deeper (three `Conv2D` +
   `BatchNormalization` blocks instead of two) and the trained model was
-  quantized to a fully `int8` `.tflite` file — the firmware requires
+  quantized to a fully `int8` `.tflite` file, the firmware requires
   `int8` tensors specifically.
 - On the firmware side, `micro_speech/main/main_functions.cc` and
   `micro_model_settings.h` had to be updated to match the new model:
@@ -99,11 +99,11 @@ and exports a quantized `.tflite` file ready to convert into
 
 ## Result
 
-The quantized model reaches **84.50% accuracy** (703/832) on a held-out
-test set — measured on the actual exported `.tflite` file, not just the
+The quantized model reaches **84.50% accuracy** (703/832) on a
+test set measured on the actual exported `.tflite` file, not just the
 float training model, so quantization's real impact is accounted for.
 
 ## Credits
 
-- [`micro_speech`](https://github.com/espressif/esp-tflite-micro/tree/master/examples/micro_speech) and [`esp-tflite-micro`](https://github.com/espressif/esp-tflite-micro) — Espressif Systems, built on Google's [TensorFlow Lite Micro](https://github.com/tensorflow/tflite-micro).
-- [Simple audio recognition](https://www.tensorflow.org/tutorials/audio/simple_audio) tutorial and the mini [Speech Commands dataset](https://arxiv.org/abs/1804.03209) (Warden, 2018) — TensorFlow / Google.
+- [`micro_speech`](https://github.com/espressif/esp-tflite-micro/tree/master/examples/micro_speech) and [`esp-tflite-micro`](https://github.com/espressif/esp-tflite-micro) - Espressif Systems, built on Google's [TensorFlow Lite Micro](https://github.com/tensorflow/tflite-micro).
+- [Simple audio recognition](https://www.tensorflow.org/tutorials/audio/simple_audio) tutorial and the mini [Speech Commands dataset](https://arxiv.org/abs/1804.03209) (Warden, 2018) - TensorFlow / Google.
